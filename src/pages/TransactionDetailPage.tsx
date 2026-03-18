@@ -1,415 +1,363 @@
-import { useState, useEffect } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
-import {
-  useTransaction,
-  useUpdateTransactionStatus,
-  useDeleteTransaction,
-  useCanApprove,
-  useCurrentEmployee,
-  useCategories,
-} from '@/hooks/useAppData'
-import { StatusBadge } from '@/components/shared/StatusBadge'
-import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
-import { formatDate } from '@/lib/formatters'
-import { getReceiptImageUrl } from '@/lib/storage'
-import {
-  TRANSACTION_TYPE_LABELS,
-  INCOME_EXPENSE_LABELS,
-  BILLING_STATUS_LABELS,
-} from '@/lib/constants'
-import { ArrowLeft, Send, Check, X, RotateCcw, Receipt, ZoomIn, Pencil, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { ArrowLeft, Edit, Camera, ImagePlus } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore, is本社管理者, isSV, isホーム長 } from '@/stores/authStore'
+import { formatCurrency, formatDate } from '@/lib/utils'
+import { is入金 } from '@/lib/constants'
+import { notify修正依頼, notify修正完了 } from '@/lib/notifications'
+import type { Transaction } from '@/types/database'
 
 export function TransactionDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const { id } = useParams()
   const navigate = useNavigate()
-  const { transaction, isLoading, refetch } = useTransaction(id)
-  const updateStatus = useUpdateTransactionStatus()
-  const deleteTransaction = useDeleteTransaction()
-  const currentEmployee = useCurrentEmployee()
-  const canApprove = useCanApprove(transaction?.location_id)
-  const categories = useCategories()
-
-  const [showRejectModal, setShowRejectModal] = useState(false)
-  const [showConfirmModal, setShowConfirmModal] = useState<'submit' | 'approve' | null>(null)
-  const [rejectionReason, setRejectionReason] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [showDeleteModal, setShowDeleteModal] = useState(false)
-  const [receiptUrl, setReceiptUrl] = useState<string | null>(null)
-  const [showImageModal, setShowImageModal] = useState(false)
+  const { user, employee } = useAuthStore()
+  const [transaction, setTransaction] = useState<Transaction | null>(null)
+  const [showCorrectionInput, setShowCorrectionInput] = useState(false)
+  const [correctionContent, setCorrectionContent] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [show証憑修正, setShow証憑修正] = useState(false)
+  const [証憑File, set証憑File] = useState<File | null>(null)
+  const [証憑Preview, set証憑Preview] = useState<string | null>(null)
 
   useEffect(() => {
-    if (transaction?.receipt_image_path) {
-      getReceiptImageUrl(transaction.receipt_image_path).then(setReceiptUrl)
-    } else {
-      setReceiptUrl(null)
-    }
-  }, [transaction?.receipt_image_path])
+    if (!id) return
+    supabase
+      .from('transactions')
+      .select('*')
+      .eq('id', id)
+      .single()
+      .then(({ data }) => {
+        setTransaction(data as Transaction | null)
+        setLoading(false)
+      })
+  }, [id])
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <LoadingSpinner size="lg" />
-      </div>
-    )
+  if (loading) return <div className="p-4 text-center text-muted">読み込み中...</div>
+  if (!transaction) return <div className="p-4 text-center text-muted">レコードが見つかりません</div>
+
+  const t = transaction
+  const canEdit = t.締めステータス === '未'
+  const canSV締め = (isSV(employee) || is本社管理者(employee)) && t.締めステータス === '未'
+  const can修正依頼 = (isSV(employee) || is本社管理者(employee)) && t.締めステータス === '済'
+  const can修正依頼取消 = (isSV(employee) || is本社管理者(employee)) && t.修正依頼フラグ
+  const can修正完了 = (isホーム長(employee) || is本社管理者(employee)) && t.修正依頼フラグ
+  // AppSheet: 証憑修正 - 修正依頼中 かつ 本社管理者/SV/ホーム長 のみ
+  const can証憑修正 = t.修正依頼フラグ && (is本社管理者(employee) || isSV(employee) || isホーム長(employee))
+
+  // SV締め アクション
+  const handleSV締め = async () => {
+    const now = new Date().toISOString()
+    await supabase
+      .from('transactions')
+      .update({
+        締めステータス: '済',
+        更新日時: now,
+        更新者: user?.email,
+      })
+      .eq('id', t.id)
+    navigate('/sv-closing')
   }
 
-  if (!transaction) {
-    return (
-      <div className="space-y-4">
-        <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
-          <ArrowLeft className="h-4 w-4" /> 戻る
-        </button>
-        <p className="text-center text-muted-foreground">取引が見つかりません</p>
-      </div>
-    )
+  // 修正依頼 アクション (AppSheet: [_INPUT] で修正依頼内容を入力)
+  const handle修正依頼 = async () => {
+    if (!correctionContent.trim()) return
+    const now = new Date().toISOString()
+    await supabase
+      .from('transactions')
+      .update({
+        修正依頼フラグ: true,
+        修正依頼内容: correctionContent,
+        修正依頼者: user?.email,
+        修正依頼日時: now,
+        締めステータス: '未',
+        更新日時: now,
+        更新者: user?.email,
+      })
+      .eq('id', t.id)
+
+    // Bot 3: 修正依頼通知
+    await notify修正依頼(t.拠点, correctionContent, user!.email ?? '', t.id)
+
+    navigate('/corrections')
   }
 
-  const isRecorder = transaction.recorded_by === currentEmployee?.id
-  const isNotRecorder = !isRecorder
-  const categoryName = transaction.category?.name ?? categories.find((c) => c.id === transaction.category_id)?.name ?? ''
-
-  const handleAction = async (action: 'submit' | 'approve' | 'reject' | 'revert_to_draft') => {
-    if (action === 'reject') {
-      setShowRejectModal(true)
-      return
-    }
-    if (action === 'submit' || action === 'approve') {
-      setShowConfirmModal(action)
-      return
-    }
-
-    await executeAction(action)
+  // 修正依頼取消 アクション
+  const handle修正依頼取消 = async () => {
+    const now = new Date().toISOString()
+    await supabase
+      .from('transactions')
+      .update({
+        修正依頼フラグ: false,
+        修正依頼内容: null,
+        修正依頼者: null,
+        修正依頼日時: null,
+        更新日時: now,
+        更新者: user?.email,
+      })
+      .eq('id', t.id)
+    navigate(-1)
   }
 
-  const executeAction = async (action: 'submit' | 'approve' | 'reject' | 'revert_to_draft', reason?: string) => {
-    setIsSubmitting(true)
-    const { error } = await updateStatus(transaction.id, action, reason)
-    if (error) {
-      console.error(error)
+  // 修正完了 アクション
+  const handle修正完了 = async () => {
+    const now = new Date().toISOString()
+    await supabase
+      .from('transactions')
+      .update({
+        修正依頼フラグ: false,
+        更新日時: now,
+        更新者: user?.email,
+      })
+      .eq('id', t.id)
+
+    // Bot 5: 修正完了通知
+    if (t.修正依頼者) {
+      await notify修正完了(t.拠点, t.修正依頼者 ?? '', user!.email ?? '', t.id)
     }
-    setShowConfirmModal(null)
-    await refetch()
-    setIsSubmitting(false)
+
+    navigate('/corrections')
   }
 
-  const handleDelete = async () => {
-    setIsSubmitting(true)
-    const { error } = await deleteTransaction(transaction.id)
-    if (error) {
-      console.error(error)
-      setIsSubmitting(false)
-      return
-    }
-    navigate('/transactions', { replace: true })
-  }
+  // 証憑修正 アクション (AppSheet: 証憑のみ編集フォーム)
+  const handle証憑修正 = async () => {
+    if (!証憑File) return
+    const now = new Date().toISOString()
+    const fileName = `${t.id}-${証憑File.name}`
+    const { data: upload } = await supabase.storage
+      .from('receipts')
+      .upload(fileName, 証憑File)
+    if (!upload) return
 
-  const handleReject = async () => {
-    if (!rejectionReason.trim()) return
-    setIsSubmitting(true)
-    const { error } = await updateStatus(transaction.id, 'reject', rejectionReason.trim())
-    if (error) {
-      console.error(error)
-    }
-    setShowRejectModal(false)
-    setRejectionReason('')
-    await refetch()
-    setIsSubmitting(false)
+    const { data: { publicUrl } } = supabase.storage
+      .from('receipts')
+      .getPublicUrl(upload.path)
+
+    await supabase
+      .from('transactions')
+      .update({ 証憑: publicUrl, 更新日時: now, 更新者: user?.email })
+      .eq('id', t.id)
+
+    setTransaction({ ...t, 証憑: publicUrl })
+    setShow証憑修正(false)
+    set証憑File(null)
+    set証憑Preview(null)
   }
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
-          <ArrowLeft className="h-4 w-4" /> 戻る
+    <div className="p-4">
+      {/* ヘッダー */}
+      <div className="flex items-center gap-2 mb-4">
+        <button onClick={() => navigate(-1)}>
+          <ArrowLeft className="w-5 h-5" />
         </button>
-        <h2 className="text-xl font-bold">入出金詳細</h2>
+        <h2 className="text-lg font-bold">入出金詳細</h2>
       </div>
 
-      {/* Status + Date */}
-      <div className="flex items-center gap-3">
-        <StatusBadge status={transaction.approval_status} />
-        <span className="text-sm text-muted-foreground">{formatDate(transaction.transaction_date)}</span>
-      </div>
-
-      {/* Rejection reason banner */}
-      {transaction.approval_status === 'rejected' && transaction.rejection_reason && (
-        <div className="rounded-lg border border-expense/30 bg-expense/10 p-3">
-          <p className="text-sm font-medium text-expense">差戻し理由</p>
-          <p className="mt-1 text-sm">{transaction.rejection_reason}</p>
+      {/* 修正依頼バナー */}
+      {t.修正依頼フラグ && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
+          <p className="text-sm font-bold text-red-700">修正依頼中</p>
+          <p className="text-sm text-red-600 mt-1">{t.修正依頼内容}</p>
+          <p className="text-xs text-red-400 mt-1">
+            依頼者: {t.修正依頼者} / {t.修正依頼日時 && formatDate(t.修正依頼日時, 'yyyy/MM/dd HH:mm')}
+          </p>
         </div>
       )}
 
-      {/* Detail Card */}
-      <div className="rounded-lg border border-border bg-card divide-y divide-border">
-        <DetailRow label="入出金区分" value={INCOME_EXPENSE_LABELS[transaction.income_expense]} />
-        <DetailRow label="対応種別" value={TRANSACTION_TYPE_LABELS[transaction.transaction_type]} />
-        <DetailRow label="カテゴリ" value={categoryName} />
-        <div className="flex items-center justify-between px-4 py-3">
-          <span className="text-sm text-muted-foreground">金額</span>
-          <CurrencyDisplay amount={transaction.amount} type={transaction.income_expense} showSign />
-        </div>
-        <DetailRow label="摘要" value={transaction.description} />
-        {transaction.transaction_type === 'cash_advance' && transaction.billing_status && (
-          <DetailRow label="請求状態" value={BILLING_STATUS_LABELS[transaction.billing_status] ?? transaction.billing_status} />
+      {/* 詳細 */}
+      <div className="bg-card rounded-xl shadow-sm p-4 space-y-3">
+        <DetailRow label="日付" value={formatDate(t.日付)} />
+        <DetailRow label="対応種別" value={t.対応種別} />
+        <DetailRow label="摘要カテゴリ" value={t.摘要カテゴリ} />
+        <DetailRow
+          label="金額"
+          value={`${is入金(t.対応種別) ? '+' : '-'}${formatCurrency(t.金額)}`}
+          className={is入金(t.対応種別) ? 'text-success' : 'text-danger'}
+        />
+        {t.利用者 && <DetailRow label="利用者" value={t.利用者} />}
+        {t.摘要 && <DetailRow label="摘要" value={t.摘要} />}
+        {t.使用金額 != null && (
+          <DetailRow label="使用金額" value={formatCurrency(t.使用金額)} />
         )}
-        {transaction.billing_year != null && transaction.billing_month != null && (
-          <DetailRow label="請求対象月" value={`${transaction.billing_year}年${transaction.billing_month}月`} />
+        {t.入金おつり != null && (
+          <DetailRow label="入金（おつり）" value={formatCurrency(t.入金おつり)} />
         )}
-        {transaction.is_over_limit && (
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-muted-foreground">立替上限超過</span>
-            <span className="rounded bg-expense/10 px-1.5 py-0.5 text-xs font-medium text-expense">上限超過承認済</span>
-          </div>
+        {t.不明金 != null && (
+          <DetailRow label="不明金" value={formatCurrency(t.不明金)} />
         )}
-        {transaction.billing_id && (
-          <div className="flex items-center justify-between px-4 py-3">
-            <span className="text-sm text-muted-foreground">請求書</span>
-            <Link to={`/billing/${transaction.billing_id}`} className="text-sm font-medium text-primary hover:underline">
-              請求書を表示
-            </Link>
-          </div>
-        )}
-        {transaction.notes && <DetailRow label="備考" value={transaction.notes} />}
-        <DetailRow label="記録者" value={transaction.recorder?.name ?? currentEmployee?.name ?? '-'} />
-        <DetailRow label="記録日時" value={formatDate(transaction.created_at)} />
-        {transaction.approved_at && (
-          <DetailRow label="承認日時" value={formatDate(transaction.approved_at)} />
-        )}
-      </div>
+        {t.不明金の理由 && <DetailRow label="不明金の理由" value={t.不明金の理由} />}
+        <DetailRow label="締めステータス" value={t.締めステータス} />
+        <DetailRow label="作成者" value={t.作成者} />
+        <DetailRow
+          label="作成日時"
+          value={formatDate(t.作成日時, 'yyyy/MM/dd HH:mm')}
+        />
 
-      {/* Receipt Image */}
-      {transaction.receipt_image_path && (
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Receipt className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">証憑（レシート）</span>
-          </div>
-          {receiptUrl ? (
-            <button
-              type="button"
-              onClick={() => setShowImageModal(true)}
-              className="relative group w-full"
-            >
-              <img
-                src={receiptUrl}
-                alt="レシート画像"
-                className="w-full max-h-48 rounded-md border border-border object-contain bg-muted/30"
-              />
-              <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/0 group-hover:bg-black/20 transition-colors">
-                <ZoomIn className="h-6 w-6 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-              </div>
-            </button>
-          ) : (
-            <p className="text-sm text-muted-foreground">画像を読み込み中...</p>
-          )}
-        </div>
-      )}
-
-      {/* Action Buttons */}
-      <div className="flex flex-wrap gap-2">
-        {(transaction.approval_status === 'draft' || transaction.approval_status === 'rejected') && isRecorder && (
-          <Link
-            to={`/transactions/${transaction.id}/edit`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
-          >
-            <Pencil className="h-4 w-4" />
-            編集
-          </Link>
-        )}
-        {transaction.approval_status === 'draft' && isRecorder && (
-          <ActionButton
-            onClick={() => handleAction('submit')}
-            disabled={isSubmitting}
-            icon={<Send className="h-4 w-4" />}
-            label="承認申請"
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
-          />
-        )}
-        {transaction.approval_status === 'pending' && canApprove && isNotRecorder && (
-          <>
-            <ActionButton
-              onClick={() => handleAction('approve')}
-              disabled={isSubmitting}
-              icon={<Check className="h-4 w-4" />}
-              label="承認"
-              className="bg-income text-white hover:bg-income/90"
+        {/* 証憑画像 */}
+        {t.証憑 && (
+          <div>
+            <p className="text-xs text-muted mb-1">証憑</p>
+            <img
+              src={t.証憑}
+              alt="証憑"
+              className="w-full max-h-64 object-contain rounded-lg border border-border"
             />
-            <ActionButton
-              onClick={() => handleAction('reject')}
-              disabled={isSubmitting}
-              icon={<X className="h-4 w-4" />}
-              label="差戻し"
-              className="bg-expense text-white hover:bg-expense/90"
-            />
-          </>
-        )}
-        {transaction.approval_status === 'rejected' && isRecorder && (
-          <ActionButton
-            onClick={() => handleAction('revert_to_draft')}
-            disabled={isSubmitting}
-            icon={<RotateCcw className="h-4 w-4" />}
-            label="修正して再申請"
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
-          />
-        )}
-        {transaction.approval_status === 'draft' && isRecorder && (
-          <ActionButton
-            onClick={() => setShowDeleteModal(true)}
-            disabled={isSubmitting}
-            icon={<Trash2 className="h-4 w-4" />}
-            label="削除"
-            className="border border-expense text-expense hover:bg-expense/10"
-          />
+          </div>
         )}
       </div>
 
-      {/* Confirm Modal */}
-      {showConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-lg bg-card p-6 shadow-lg">
-            <h3 className="text-lg font-bold">
-              {showConfirmModal === 'submit' ? '承認申請の確認' : '承認の確認'}
-            </h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {showConfirmModal === 'submit'
-                ? 'この取引の承認申請を提出しますか？'
-                : 'この取引を承認しますか？'}
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => setShowConfirmModal(null)}
-                className="rounded-md border border-input px-4 py-2 text-sm hover:bg-muted"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={() => executeAction(showConfirmModal)}
-                disabled={isSubmitting}
-                className={`rounded-md px-4 py-2 text-sm text-white disabled:opacity-50 ${
-                  showConfirmModal === 'approve' ? 'bg-income hover:bg-income/90' : 'bg-primary hover:bg-primary/90'
-                }`}
-              >
-                {showConfirmModal === 'submit' ? '申請する' : '承認する'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Rejection Modal */}
-      {showRejectModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-lg bg-card p-6 shadow-lg">
-            <h3 className="text-lg font-bold">差戻し理由</h3>
-            <textarea
-              className="mt-3 w-full rounded-md border border-input bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              rows={4}
-              placeholder="差戻し理由を入力してください..."
-              value={rejectionReason}
-              onChange={(e) => setRejectionReason(e.target.value)}
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => { setShowRejectModal(false); setRejectionReason('') }}
-                className="rounded-md border border-input px-4 py-2 text-sm hover:bg-muted"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={handleReject}
-                disabled={!rejectionReason.trim() || isSubmitting}
-                className="rounded-md bg-expense px-4 py-2 text-sm text-white hover:bg-expense/90 disabled:opacity-50"
-              >
-                差戻し確定
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-lg bg-card p-6 shadow-lg">
-            <h3 className="text-lg font-bold text-expense">取引の削除</h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              この取引を削除しますか？この操作は取り消せません。
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                className="rounded-md border border-input px-4 py-2 text-sm hover:bg-muted"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={isSubmitting}
-                className="rounded-md bg-expense px-4 py-2 text-sm text-white hover:bg-expense/90 disabled:opacity-50"
-              >
-                削除する
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Image Fullscreen Modal */}
-      {showImageModal && receiptUrl && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-          onClick={() => setShowImageModal(false)}
-        >
+      {/* アクションボタン (AppSheet Actions 再現) */}
+      <div className="mt-4 space-y-2">
+        {canEdit && (
           <button
-            onClick={() => setShowImageModal(false)}
-            className="absolute top-4 right-4 rounded-full bg-black/60 p-2 text-white hover:bg-black/80"
+            onClick={() => navigate(`/transactions/${t.id}/edit`)}
+            className="w-full flex items-center justify-center gap-2 bg-primary text-white rounded-lg px-4 py-3 font-medium"
           >
-            <X className="h-5 w-5" />
+            <Edit className="w-4 h-4" />
+            編集
           </button>
-          <img
-            src={receiptUrl}
-            alt="レシート画像"
-            className="max-h-[90vh] max-w-[90vw] rounded-md object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
+        )}
+
+        {canSV締め && (
+          <button
+            onClick={handleSV締め}
+            className="w-full bg-green-600 text-white rounded-lg px-4 py-3 font-medium"
+          >
+            SV締め
+          </button>
+        )}
+
+        {can修正依頼 && !showCorrectionInput && (
+          <button
+            onClick={() => setShowCorrectionInput(true)}
+            className="w-full bg-warning text-white rounded-lg px-4 py-3 font-medium"
+          >
+            修正依頼
+          </button>
+        )}
+
+        {showCorrectionInput && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 space-y-2">
+            <textarea
+              value={correctionContent}
+              onChange={(e) => setCorrectionContent(e.target.value)}
+              className="form-input"
+              placeholder="修正依頼内容を入力してください"
+              rows={3}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handle修正依頼}
+                className="flex-1 bg-warning text-white rounded-lg px-4 py-2 font-medium text-sm"
+              >
+                送信
+              </button>
+              <button
+                onClick={() => setShowCorrectionInput(false)}
+                className="flex-1 bg-gray-200 rounded-lg px-4 py-2 text-sm"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        )}
+
+        {can修正依頼取消 && (
+          <button
+            onClick={handle修正依頼取消}
+            className="w-full bg-gray-500 text-white rounded-lg px-4 py-3 font-medium"
+          >
+            修正依頼取消
+          </button>
+        )}
+
+        {can修正完了 && (
+          <button
+            onClick={handle修正完了}
+            className="w-full bg-success text-white rounded-lg px-4 py-3 font-medium"
+          >
+            修正完了
+          </button>
+        )}
+
+        {can証憑修正 && !show証憑修正 && (
+          <button
+            onClick={() => setShow証憑修正(true)}
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white rounded-lg px-4 py-3 font-medium"
+          >
+            <ImagePlus className="w-4 h-4" />
+            証憑修正
+          </button>
+        )}
+
+        {show証憑修正 && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+            <p className="text-sm font-medium text-blue-700">証憑を差し替え</p>
+            <label className="flex items-center gap-2 cursor-pointer form-input bg-white">
+              <Camera className="w-5 h-5 text-muted" />
+              <span className="text-muted text-sm">
+                {証憑File ? 証憑File.name : '写真を撮影/選択'}
+              </span>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  set証憑File(file)
+                  set証憑Preview(URL.createObjectURL(file))
+                }}
+                className="hidden"
+              />
+            </label>
+            {証憑Preview && (
+              <img
+                src={証憑Preview}
+                alt="新しい証憑"
+                className="w-full max-h-48 object-contain rounded-lg border border-border"
+              />
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={handle証憑修正}
+                disabled={!証憑File}
+                className="flex-1 bg-blue-600 text-white rounded-lg px-4 py-2 font-medium text-sm disabled:opacity-50"
+              >
+                更新
+              </button>
+              <button
+                onClick={() => {
+                  setShow証憑修正(false)
+                  set証憑File(null)
+                  set証憑Preview(null)
+                }}
+                className="flex-1 bg-gray-200 rounded-lg px-4 py-2 text-sm"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between px-4 py-3">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium">{value}</span>
-    </div>
-  )
-}
-
-function ActionButton({
-  onClick,
-  disabled,
-  icon,
+function DetailRow({
   label,
+  value,
   className,
 }: {
-  onClick: () => void
-  disabled: boolean
-  icon: React.ReactNode
   label: string
-  className: string
+  value: string
+  className?: string
 }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50 ${className}`}
-    >
-      {icon}
-      {label}
-    </button>
+    <div className="flex justify-between items-center py-1 border-b border-gray-50">
+      <span className="text-sm text-muted">{label}</span>
+      <span className={`text-sm font-medium ${className ?? ''}`}>{value}</span>
+    </div>
   )
 }

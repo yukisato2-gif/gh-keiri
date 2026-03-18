@@ -1,156 +1,192 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { useBillings, useCurrentLocation, useCurrentEmployee } from '@/hooks/useAppData'
-import { CurrencyDisplay } from '@/components/shared/CurrencyDisplay'
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
-import { EmptyState } from '@/components/shared/EmptyState'
-import { formatDate, formatCurrency } from '@/lib/formatters'
-import { INVOICE_STATUS_LABELS } from '@/lib/constants'
-import type { InvoiceStatus } from '@/types/database'
-import { FileText, Plus } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, Filter } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore, isSV, is本社管理者 } from '@/stores/authStore'
+import { useLocationStore } from '@/stores/locationStore'
+import { formatCurrency, formatDate } from '@/lib/utils'
+import type { Billing, 請求書ステータス } from '@/types/database'
+import { 請求書ステータスLabels, 請求書ステータスValues } from '@/types/database'
 
-function getYearMonthOptions() {
-  const now = new Date()
-  const options: { value: string; label: string }[] = []
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    const label = `${d.getFullYear()}年${d.getMonth() + 1}月`
-    options.push({ value, label })
-  }
-  return options
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  draft: 'bg-muted text-muted-foreground',
-  issued: 'bg-primary/10 text-primary',
-  sent: 'bg-primary/10 text-primary',
-  partial: 'bg-warning/10 text-warning',
-  paid: 'bg-income/10 text-income',
-  overdue: 'bg-expense/10 text-expense',
-  cancelled: 'bg-muted text-muted-foreground line-through',
+const statusColorMap: Record<請求書ステータス, string> = {
+  draft: 'bg-gray-100 text-gray-700',
+  issued: 'bg-blue-100 text-blue-700',
+  sent: 'bg-indigo-100 text-indigo-700',
+  partial: 'bg-yellow-100 text-yellow-700',
+  paid: 'bg-green-100 text-green-700',
+  overpaid: 'bg-emerald-100 text-emerald-700',
+  overdue: 'bg-red-100 text-red-700',
+  cancelled: 'bg-gray-200 text-gray-500',
 }
 
 export function BillingListPage() {
-  const { locationId } = useCurrentLocation()
-  const employee = useCurrentEmployee()
+  const navigate = useNavigate()
+  const { employee } = useAuthStore()
+  const { 選択拠点 } = useLocationStore()
+
   const now = new Date()
-  const [yearMonth, setYearMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
-  const [filterStatus, setFilterStatus] = useState('')
-  const { billings, isLoading } = useBillings(locationId, yearMonth)
-  const monthOptions = getYearMonthOptions()
+  const [year, setYear] = useState(now.getFullYear())
+  const [month, setMonth] = useState(now.getMonth() + 1)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [billings, setBillings] = useState<Billing[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showFilter, setShowFilter] = useState(false)
 
-  const canCreateBilling = employee?.role !== 'home_manager'
+  const canCreate = isSV(employee) || is本社管理者(employee)
 
-  const filtered = filterStatus
-    ? billings.filter((b) => b.status === filterStatus)
-    : billings
+  useEffect(() => {
+    if (!選択拠点) return
+    setLoading(true)
 
-  const totalAmount = filtered.reduce((sum, b) => sum + b.total_amount, 0)
-  const totalPaid = filtered.reduce((sum, b) => sum + b.paid_amount, 0)
-  const totalCarriedOver = filtered.reduce((sum, b) => sum + (b.carried_over_amount ?? 0), 0)
-  const totalOutstanding = totalAmount + totalCarriedOver - totalPaid
+    let query = supabase
+      .from('billings')
+      .select('*')
+      .eq('拠点', 選択拠点)
+      .eq('billing_year', year)
+      .eq('billing_month', month)
+      .order('billing_date', { ascending: false })
+
+    if (statusFilter) {
+      query = query.eq('status', statusFilter)
+    }
+
+    query.then(({ data }) => {
+      setBillings((data ?? []) as Billing[])
+      setLoading(false)
+    })
+  }, [選択拠点, year, month, statusFilter])
+
+  const goMonth = (delta: number) => {
+    let m = month + delta
+    let y = year
+    if (m > 12) { m = 1; y++ }
+    if (m < 1) { m = 12; y-- }
+    setYear(y)
+    setMonth(m)
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold">請求管理</h2>
-        {canCreateBilling && (
-          <Link
-            to="/billing/create"
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+    <div className="p-4">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-bold">請求管理一覧</h2>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowFilter(!showFilter)}
+            className={`flex items-center gap-1 text-sm rounded-lg px-3 py-2 ${
+              showFilter || statusFilter ? 'bg-primary text-white' : 'bg-gray-100'
+            }`}
           >
-            <Plus className="h-4 w-4" />
-            請求書作成
-          </Link>
-        )}
+            <Filter className="w-4 h-4" />
+          </button>
+          {canCreate && (
+            <button
+              onClick={() => navigate('/billing/create')}
+              className="flex items-center gap-1 text-sm bg-primary text-white rounded-lg px-3 py-2"
+            >
+              <Plus className="w-4 h-4" />
+              請求書作成
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={yearMonth}
-          onChange={(e) => setYearMonth(e.target.value)}
-          className="rounded-md border border-input bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      {/* Month selector */}
+      <div className="flex items-center justify-center gap-4 mb-4">
+        <button
+          onClick={() => goMonth(-1)}
+          className="bg-gray-100 text-gray-700 rounded-lg px-3 py-2 text-sm"
         >
-          {monthOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="rounded-md border border-input bg-white px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          &lt; 前月
+        </button>
+        <span className="text-lg font-bold">
+          {year}年{month}月
+        </span>
+        <button
+          onClick={() => goMonth(1)}
+          className="bg-gray-100 text-gray-700 rounded-lg px-3 py-2 text-sm"
         >
-          <option value="">全ステータス</option>
-          {Object.entries(INVOICE_STATUS_LABELS).map(([key, label]) => (
-            <option key={key} value={key}>{label}</option>
-          ))}
-        </select>
+          翌月 &gt;
+        </button>
       </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">請求合計</p>
-          <p className="text-lg font-bold tabular-nums">{formatCurrency(totalAmount)}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">入金済</p>
-          <p className="text-lg font-bold tabular-nums text-income">{formatCurrency(totalPaid)}</p>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-3">
-          <p className="text-xs text-muted-foreground">未収</p>
-          <p className="text-lg font-bold tabular-nums text-expense">{formatCurrency(totalOutstanding)}</p>
-        </div>
-      </div>
-
-      {/* Billing list */}
-      <div className="rounded-lg border border-border bg-card">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <LoadingSpinner />
+      {/* Filter panel */}
+      {showFilter && (
+        <div className="bg-white rounded-xl shadow-sm p-4 mb-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 w-16 shrink-0">ステータス</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="text-sm border rounded-lg px-2 py-1.5 flex-1"
+            >
+              <option value="">すべて</option>
+              {請求書ステータスValues.map((s) => (
+                <option key={s} value={s}>
+                  {請求書ステータスLabels[s]}
+                </option>
+              ))}
+            </select>
           </div>
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={<FileText className="h-10 w-10" />}
-            title="請求書がありません"
-            description={canCreateBilling ? '「請求書作成」ボタンから作成できます' : 'この月の請求書はまだ作成されていません'}
-          />
-        ) : (
-          <div className="divide-y divide-border">
-            {filtered.map((billing) => (
-              <Link
-                key={billing.id}
-                to={`/billing/${billing.id}`}
-                className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50 transition-colors"
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-center py-8 text-muted">読み込み中...</div>
+      ) : billings.length === 0 ? (
+        <div className="text-center py-8 text-muted">
+          請求データがありません
+        </div>
+      ) : (
+        <>
+          <div className="text-sm text-muted mb-3 text-right">
+            {billings.length}件
+          </div>
+
+          <div className="space-y-2">
+            {billings.map((b) => (
+              <button
+                key={b.id}
+                onClick={() => navigate(`/billing/${b.id}`)}
+                className="w-full bg-white rounded-xl shadow-sm p-4 text-left"
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                  <FileText className="h-4 w-4 text-primary" />
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-gray-500 font-mono">
+                    {b.billing_number}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      statusColorMap[b.status] ?? 'bg-gray-100 text-gray-700'
+                    }`}
+                  >
+                    {請求書ステータスLabels[b.status] ?? b.status}
+                  </span>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-medium">{billing.billing_number}</span>
-                    <span className={`rounded px-1.5 py-0.5 text-xs ${STATUS_COLORS[billing.status] ?? ''}`}>
-                      {INVOICE_STATUS_LABELS[billing.status] ?? billing.status}
-                    </span>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">{b.利用者 ?? '-'}</p>
+                    <p className="text-xs text-gray-500">
+                      {formatDate(b.billing_date)}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-                    <span>{billing.resident?.name ?? '-'}</span>
-                    <span>{formatDate(billing.billing_date)}</span>
+                  <div className="text-right">
+                    <p className="font-bold">{formatCurrency(b.total_amount)}</p>
+                    {b.balance > 0 && b.status !== 'draft' && (
+                      <p className="text-xs text-red-600">
+                        残高: {formatCurrency(b.balance)}
+                      </p>
+                    )}
                   </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <CurrencyDisplay amount={billing.total_amount} type="expense" />
-                  {billing.paid_amount > 0 && (
-                    <p className="text-xs text-income">入金: {formatCurrency(billing.paid_amount)}</p>
-                  )}
-                </div>
-              </Link>
+                {b.paid_amount > 0 && (
+                  <div className="mt-1 text-xs text-gray-500">
+                    入金済: {formatCurrency(b.paid_amount)}
+                  </div>
+                )}
+              </button>
             ))}
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   )
 }

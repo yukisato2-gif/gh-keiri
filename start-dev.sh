@@ -1,4 +1,4 @@
 #!/bin/bash
-export PATH="$HOME/local/node/bin:$PATH"
-cd "$(dirname "$0")"
-exec npx vite --host --port 5174
+export PATH="/Users/administrator/local/node/bin:$PATH"
+cd "/Users/administrator/claude/claude code/gh-suitocho"
+exec node ./node_modules/.bin/vite --port 5173 --host
