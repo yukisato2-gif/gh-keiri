@@ -83,7 +83,7 @@ export function useAuth() {
       if (employee.role === 'hq_admin' || employee.role === 'section_chief') {
         // Admin/Chief can access all locations
         const { data } = await supabase
-          .from('locations')
+          .from('keiri_locations')
           .select('*')
           .eq('is_active', true)
           .order('code')
@@ -91,7 +91,7 @@ export function useAuth() {
       } else {
         // Fetch authorized locations
         const { data: authorities } = await supabase
-          .from('employee_location_authority')
+          .from('keiri_employee_location_authority')
           .select('location_id')
           .eq('employee_id', employee.id)
           .eq('can_read', true)
@@ -99,7 +99,7 @@ export function useAuth() {
         if (authorities && authorities.length > 0) {
           const locationIds = authorities.map((a) => a.location_id)
           const { data } = await supabase
-            .from('locations')
+            .from('keiri_locations')
             .select('*')
             .in('id', locationIds)
             .eq('is_active', true)
@@ -112,7 +112,7 @@ export function useAuth() {
           const hasPrimary = locations.some((l) => l.id === employee.primary_location_id)
           if (!hasPrimary) {
             const { data } = await supabase
-              .from('locations')
+              .from('keiri_locations')
               .select('*')
               .eq('id', employee.primary_location_id)
               .single()

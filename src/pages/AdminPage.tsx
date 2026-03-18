@@ -98,9 +98,9 @@ export function AdminPage() {
     }
 
     const [empRes, locRes, resRes] = await Promise.all([
-      supabase!.from('employees').select('*, primary_location:locations(*)').order('employee_code'),
-      supabase!.from('locations').select('*, area:areas(*)').order('code'),
-      supabase!.from('residents').select('*').order('name'),
+      supabase!.from('keiri_employees').select('*, primary_location:keiri_locations(*)').order('employee_code'),
+      supabase!.from('keiri_locations').select('*, area:keiri_areas(*)').order('code'),
+      supabase!.from('keiri_residents').select('*').order('name'),
     ])
 
     if (empRes.data) setEmployees(empRes.data as Employee[])
@@ -224,7 +224,7 @@ export function AdminPage() {
         .map((a) => ({ id: a.id, location_id: a.location_id, can_read: a.can_read, can_write: a.can_write, can_approve: a.can_approve }))
     } else {
       const { data } = await supabase!
-        .from('employee_location_authority')
+        .from('keiri_employee_location_authority')
         .select('*')
         .eq('employee_id', emp.id)
       auths = (data ?? []).map((a: EmployeeLocationAuthority) => ({

@@ -76,7 +76,7 @@ export function useCategories() {
       return
     }
     supabase!
-      .from('categories')
+      .from('keiri_categories')
       .select('*')
       .eq('is_active', true)
       .order('sort_order')
@@ -108,7 +108,7 @@ export function useTransactions(locationId: string | undefined) {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('transactions')
+      .from('keiri_transactions')
       .select('*')
       .eq('location_id', locationId)
       .order('transaction_date', { ascending: false })
@@ -145,7 +145,7 @@ export function useCashChecks(locationId: string | undefined) {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('cash_checks')
+      .from('keiri_cash_checks')
       .select('*')
       .eq('location_id', locationId)
       .order('check_date', { ascending: false })
@@ -172,7 +172,7 @@ export function useAddTransaction() {
     }
 
     const { error } = await supabase!
-      .from('transactions')
+      .from('keiri_transactions')
       .insert(toSupabaseTxFields(tx as unknown as Record<string, unknown>))
 
     return { error }
@@ -189,7 +189,7 @@ export function useEditTransaction() {
     }
 
     const { error } = await supabase!
-      .from('transactions')
+      .from('keiri_transactions')
       .update(toSupabaseTxFields(updates as unknown as Record<string, unknown>))
       .eq('id', id)
 
@@ -207,7 +207,7 @@ export function useDeleteTransaction() {
     }
 
     const { error } = await supabase!
-      .from('transactions')
+      .from('keiri_transactions')
       .delete()
       .eq('id', id)
 
@@ -225,7 +225,7 @@ export function useAddCashCheck() {
     }
 
     const { error } = await supabase!
-      .from('cash_checks')
+      .from('keiri_cash_checks')
       .insert(check)
 
     return { error }
@@ -276,8 +276,8 @@ export function useTransaction(id: string | undefined) {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('transactions')
-      .select('*, category:categories(*), recorder:employees!recorded_by(*)')
+      .from('keiri_transactions')
+      .select('*, category:keiri_categories(*), recorder:keiri_employees!recorded_by(*)')
       .eq('id', id)
       .single()
 
@@ -330,7 +330,7 @@ export function useUpdateTransactionStatus() {
     }
 
     const { error } = await supabase!
-      .from('transactions')
+      .from('keiri_transactions')
       .update(updates)
       .eq('id', id)
 
@@ -360,7 +360,7 @@ export function useCanApprove(locationId: string | undefined) {
         return
       }
       supabase!
-        .from('employee_location_authority')
+        .from('keiri_employee_location_authority')
         .select('can_approve')
         .eq('employee_id', currentEmployee.id)
         .eq('location_id', locationId)
@@ -393,7 +393,7 @@ export function usePendingCount(locationId: string | undefined) {
     }
 
     supabase!
-      .from('transactions')
+      .from('keiri_transactions')
       .select('id', { count: 'exact', head: true })
       .eq('location_id', locationId)
       .eq('approval_status', 'pending')
@@ -419,7 +419,7 @@ export function useNotifications() {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('notifications')
+      .from('keiri_notifications')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(50)
@@ -477,7 +477,7 @@ export function useUnreadNotificationCount() {
     }
 
     const { count: c } = await supabase!
-      .from('notifications')
+      .from('keiri_notifications')
       .select('id', { count: 'exact', head: true })
       .eq('is_read', false)
 
@@ -522,7 +522,7 @@ export function useMarkNotificationRead() {
     }
 
     const { error } = await supabase!
-      .from('notifications')
+      .from('keiri_notifications')
       .update({ is_read: true })
       .eq('id', id)
 
@@ -540,7 +540,7 @@ export function useMarkAllNotificationsRead() {
     }
 
     const { error } = await supabase!
-      .from('notifications')
+      .from('keiri_notifications')
       .update({ is_read: true })
       .eq('is_read', false)
 
@@ -565,8 +565,8 @@ export function useAuditLogs(recordId?: string) {
 
     setIsLoading(true)
     let query = supabase!
-      .from('audit_logs')
-      .select('*, changer:employees!changed_by(*)')
+      .from('keiri_audit_logs')
+      .select('*, changer:keiri_employees!changed_by(*)')
       .order('created_at', { ascending: false })
       .limit(100)
 
@@ -606,7 +606,7 @@ export function useResidents(locationId: string | undefined) {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('residents')
+      .from('keiri_residents')
       .select('*')
       .eq('location_id', locationId)
       .order('name')
@@ -632,7 +632,7 @@ export function useAddResident() {
     }
 
     const { error } = await supabase!
-      .from('residents')
+      .from('keiri_residents')
       .insert(resident)
 
     return { error }
@@ -649,7 +649,7 @@ export function useEditResident() {
     }
 
     const { error } = await supabase!
-      .from('residents')
+      .from('keiri_residents')
       .update(updates)
       .eq('id', id)
 
@@ -671,8 +671,8 @@ export function useEmployees() {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('employees')
-      .select('*, primary_location:locations!primary_location_id(*)')
+      .from('keiri_employees')
+      .select('*, primary_location:keiri_locations!primary_location_id(*)')
       .order('employee_code')
 
     setEmployees((data as Employee[]) ?? [])
@@ -696,7 +696,7 @@ export function useEditEmployee() {
     }
 
     const { error } = await supabase!
-      .from('employees')
+      .from('keiri_employees')
       .update(updates)
       .eq('id', id)
 
@@ -724,7 +724,7 @@ export function useLocationAuthorities(employeeId: string | undefined) {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('employee_location_authority')
+      .from('keiri_employee_location_authority')
       .select('*')
       .eq('employee_id', employeeId)
 
@@ -760,8 +760,8 @@ export function useMonthlyCloses(locationId: string | undefined) {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('monthly_closes')
-      .select('*, closer:employees!closed_by(*)')
+      .from('keiri_monthly_closes')
+      .select('*, closer:keiri_employees!closed_by(*)')
       .eq('location_id', locationId)
       .order('close_year', { ascending: false })
       .order('close_month', { ascending: false })
@@ -797,7 +797,7 @@ export function useMonthlyClose(locationId: string | undefined, yearMonth: strin
     }
 
     supabase!
-      .from('monthly_closes')
+      .from('keiri_monthly_closes')
       .select('*')
       .eq('location_id', locationId)
       .eq('close_year', year)
@@ -821,7 +821,7 @@ export function useUpsertMonthlyClose() {
     }
 
     const { error } = await supabase!
-      .from('monthly_closes')
+      .from('keiri_monthly_closes')
       .upsert(toSupabaseMonthlyClose(mc as unknown as Record<string, unknown>), { onConflict: 'location_id,close_year,close_month' })
 
     return { error }
@@ -858,8 +858,8 @@ export function useBillings(locationId: string | undefined, yearMonth?: string) 
 
     setIsLoading(true)
     let query = supabase!
-      .from('billings')
-      .select('*, resident:residents(*)')
+      .from('keiri_billings')
+      .select('*, resident:keiri_residents(*)')
       .eq('location_id', locationId)
       .order('created_at', { ascending: false })
 
@@ -910,8 +910,8 @@ export function useBilling(id: string | undefined) {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('billings')
-      .select('*, resident:residents(*), items:billing_items(*, transaction:transactions(*))')
+      .from('keiri_billings')
+      .select('*, resident:keiri_residents(*), items:keiri_billing_items(*, transaction:keiri_transactions(*))')
       .eq('id', id)
       .single()
 
@@ -937,7 +937,7 @@ export function useAddBilling() {
 
     // Insert billing (with year_month TEXT and calculated balance)
     const { data: billingData, error: billingError } = await supabase!
-      .from('billings')
+      .from('keiri_billings')
       .insert(toSupabaseBilling(billing as unknown as Record<string, unknown>))
       .select()
       .single()
@@ -954,7 +954,7 @@ export function useAddBilling() {
     }))
 
     const { error: itemsError } = await supabase!
-      .from('billing_items')
+      .from('keiri_billing_items')
       .insert(billingItems)
 
     if (itemsError) return { error: itemsError }
@@ -963,7 +963,7 @@ export function useAddBilling() {
     const txIds = items.map((i) => i.transaction_id)
     for (const txId of txIds) {
       await supabase!
-        .from('transactions')
+        .from('keiri_transactions')
         .update({ billing_status: 'billed', billing_id: billingId, billing_year: billing.billing_year, billing_month: String(billing.billing_month) })
         .eq('id', txId)
     }
@@ -990,7 +990,7 @@ export function useUpdateBilling() {
       updatesWithBalance.balance = total + carried - paid
     }
     const { error } = await supabase!
-      .from('billings')
+      .from('keiri_billings')
       .update(updatesWithBalance)
       .eq('id', id)
 
@@ -1025,8 +1025,8 @@ export function useAdvancePayments(locationId: string | undefined, yearMonth?: s
 
     setIsLoading(true)
     let query = supabase!
-      .from('transactions')
-      .select('*, category:categories(*), resident:residents(*)')
+      .from('keiri_transactions')
+      .select('*, category:keiri_categories(*), resident:keiri_residents(*)')
       .eq('location_id', locationId)
       .eq('transaction_type', 'cash_advance')
       .eq('approval_status', 'approved')
@@ -1058,7 +1058,7 @@ export function useEditLocation() {
     }
 
     const { error } = await supabase!
-      .from('locations')
+      .from('keiri_locations')
       .update(updates)
       .eq('id', id)
 
@@ -1077,7 +1077,7 @@ export function useUpdateLocationAuthority() {
     }
 
     const { error } = await supabase!
-      .from('employee_location_authority')
+      .from('keiri_employee_location_authority')
       .upsert(auth, { onConflict: 'employee_id,location_id' })
 
     return { error }
@@ -1090,7 +1090,7 @@ export function useUpdateLocationAuthority() {
     }
 
     const { error } = await supabase!
-      .from('employee_location_authority')
+      .from('keiri_employee_location_authority')
       .delete()
       .eq('id', id)
 
@@ -1121,8 +1121,8 @@ export function usePayments(billingId: string | undefined) {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('payments')
-      .select('*, recorder:employees!recorded_by(*)')
+      .from('keiri_payments')
+      .select('*, recorder:keiri_employees!recorded_by(*)')
       .eq('billing_id', billingId)
       .order('payment_date', { ascending: false })
 
@@ -1148,14 +1148,14 @@ export function useAddPayment() {
 
     // Insert payment
     const { error: paymentError } = await supabase!
-      .from('payments')
+      .from('keiri_payments')
       .insert(payment)
 
     if (paymentError) return { error: paymentError }
 
     // Update billing paid_amount and status
     const { data: billingData } = await supabase!
-      .from('billings')
+      .from('keiri_billings')
       .select('total_amount, paid_amount')
       .eq('id', payment.billing_id)
       .single()
@@ -1172,21 +1172,21 @@ export function useAddPayment() {
       if (newStatus) billingUpdates.status = newStatus
 
       await supabase!
-        .from('billings')
+        .from('keiri_billings')
         .update(billingUpdates)
         .eq('id', payment.billing_id)
 
       // Update related transactions billing_status
       const txStatus = newBalance <= 0 ? 'paid' : 'partial'
       const { data: items } = await supabase!
-        .from('billing_items')
+        .from('keiri_billing_items')
         .select('transaction_id')
         .eq('billing_id', payment.billing_id)
 
       if (items) {
         for (const item of items) {
           await supabase!
-            .from('transactions')
+            .from('keiri_transactions')
             .update({ billing_status: txStatus })
             .eq('id', (item as { transaction_id: string }).transaction_id)
         }
@@ -1227,7 +1227,7 @@ export function useCarryOverTransactions() {
     // Supabase mode: batch update unbilled expense transactions for this location+month
     const { year: ny, month: nm } = parseYearMonth(nextMonth)
     const { data, error } = await supabase!
-      .from('transactions')
+      .from('keiri_transactions')
       .update({ billing_status: 'carried_over', billing_year: ny, billing_month: String(nm) })
       .eq('location_id', locationId)
       .gte('transaction_date', `${yearMonth}-01`)
@@ -1260,8 +1260,8 @@ export function useSettlements(yearMonth?: string) {
 
     setIsLoading(true)
     let query = supabase!
-      .from('settlements')
-      .select('*, location:locations(*)')
+      .from('keiri_settlements')
+      .select('*, location:keiri_locations(*)')
       .order('settlement_year', { ascending: false })
       .order('settlement_month', { ascending: false })
 
@@ -1300,8 +1300,8 @@ export function useSettlement(locationId: string | undefined, yearMonth: string 
     }
 
     supabase!
-      .from('settlements')
-      .select('*, location:locations(*)')
+      .from('keiri_settlements')
+      .select('*, location:keiri_locations(*)')
       .eq('location_id', locationId)
       .eq('settlement_year', year)
       .eq('settlement_month', month)
@@ -1324,7 +1324,7 @@ export function useUpsertSettlement() {
     }
 
     const { error } = await supabase!
-      .from('settlements')
+      .from('keiri_settlements')
       .upsert(toSupabaseSettlement(settlement as unknown as Record<string, unknown>), { onConflict: 'location_id,settlement_year,settlement_month' })
 
     return { error }
@@ -1341,7 +1341,7 @@ export function useUpdateSettlement() {
     }
 
     const { error } = await supabase!
-      .from('settlements')
+      .from('keiri_settlements')
       .update(updates)
       .eq('id', id)
 
@@ -1374,8 +1374,8 @@ export function useOutstandingBillings(locationId: string | undefined) {
 
     setIsLoading(true)
     const { data } = await supabase!
-      .from('billings')
-      .select('*, resident:residents(*)')
+      .from('keiri_billings')
+      .select('*, resident:keiri_residents(*)')
       .eq('location_id', locationId)
       .in('status', ['issued', 'sent', 'partial', 'overdue'])
       .order('billing_date', { ascending: true })
@@ -1436,7 +1436,7 @@ export function useResidentBalances(locationId: string | undefined) {
     // Supabase mode: query residents, unbilled transactions, and unpaid billings
     ;(async () => {
     const { data: residents } = await supabase!
-      .from('residents')
+      .from('keiri_residents')
       .select('id, name, advance_limit')
       .eq('location_id', locationId)
       .eq('is_active', true)
@@ -1450,7 +1450,7 @@ export function useResidentBalances(locationId: string | undefined) {
 
     // Get unbilled approved advance transactions
     const { data: unbilledTxs } = await supabase!
-      .from('transactions')
+      .from('keiri_transactions')
       .select('resident_id, amount')
       .in('resident_id', residentIds)
       .eq('transaction_type', 'cash_advance')
@@ -1459,7 +1459,7 @@ export function useResidentBalances(locationId: string | undefined) {
 
     // Get unpaid billings (not paid, not cancelled)
     const { data: unpaidBills } = await supabase!
-      .from('billings')
+      .from('keiri_billings')
       .select('resident_id, balance')
       .in('resident_id', residentIds)
       .not('status', 'in', '("paid","cancelled")')
@@ -1505,7 +1505,7 @@ export function useAddAuditLog() {
     }
 
     const { error } = await supabase!
-      .from('audit_logs')
+      .from('keiri_audit_logs')
       .insert(log)
 
     return { error }
